@@ -422,6 +422,30 @@ impl<O, T: ?Sized> OwningRef<O, T> {
         }
     }
 
+    /// Converts `self` into a new owning reference where the owner is wrapped
+    /// in an additional `Rc<O>`.
+    ///
+    /// This can be used to safely erase the owner of any `OwningRef<O, T>`
+    /// to a `OwningRef<Rc<Erased>, T>`.
+    pub fn map_owner_rc(self) -> OwningRef<Rc<O>, T> {
+        OwningRef {
+            reference: self.reference,
+            owner: Rc::new(self.owner),
+        }
+    }
+
+    /// Converts `self` into a new owning reference where the owner is wrapped
+    /// in an additional `Arc<O>`.
+    ///
+    /// This can be used to safely erase the owner of any `OwningRef<O, T>`
+    /// to a `OwningRef<Arc<Erased>, T>`.
+    pub fn map_owner_arc(self) -> OwningRef<Arc<O>, T> {
+        OwningRef {
+            reference: self.reference,
+            owner: Arc::new(self.owner),
+        }
+    }
+
     /// Erases the concrete base type of the owner with a trait object.
     ///
     /// This allows mixing of owned references with different owner base types.
@@ -640,6 +664,30 @@ impl<O, T: ?Sized> OwningRefMut<O, T> {
         })
     }
 
+    /// Split `self` into two disjoint mutable references with a shared owner.
+    pub fn split<F, U: ?Sized, V: ?Sized>(mut self, f: F) -> (OwningRefMut<O, U>, OwningRefMut<O, V>)
+        where F: FnOnce(&mut T) -> (&mut U, &mut V),
+              O: stable_deref_trait::CloneStableDeref
+    {
+        let p1: *mut _;
+        let p2: *mut _;
+        {
+            let (r1, r2) = f(&mut self);
+            p1 = r1;
+            p2 = r2;
+        }
+        (
+            OwningRefMut {
+                reference: p1,
+                owner: self.owner.clone(),
+            },
+            OwningRefMut {
+                reference: p2,
+                owner: self.owner,
+            },
+        )
+    }
+
     /// Converts `self` into a new owning reference with a different owner type.
     ///
     /// The new owner type needs to still contain the original owner in some way
@@ -665,6 +713,30 @@ impl<O, T: ?Sized> OwningRefMut<O, T> {
         OwningRefMut {
             reference: self.reference,
             owner: Box::new(self.owner),
+        }
+    }
+
+    /// Converts `self` into a new owning reference where the owner is wrapped
+    /// in an additional `Rc<Opaque<O>>`.
+    ///
+    /// This can be used to safely erase the owner of any `OwningRefMut<O, T>`
+    /// to a `OwningRefMut<Rc<Erased>, T>`.
+    pub fn map_owner_rc(self) -> OwningRefMut<Rc<Opaque<O>>, T> {
+        OwningRefMut {
+            reference: self.reference,
+            owner: Rc::new(Opaque::from(self.owner)),
+        }
+    }
+
+    /// Converts `self` into a new owning reference where the owner is wrapped
+    /// in an additional `Arc<Opaque<O>>`.
+    ///
+    /// This can be used to safely erase the owner of any `OwningRefMut<O, T>`
+    /// to a `OwningRefMut<Arc<Erased>, T>`.
+    pub fn map_owner_arc(self) -> OwningRefMut<Arc<Opaque<O>>, T> {
+        OwningRefMut {
+            reference: self.reference,
+            owner: Arc::new(Opaque::from(self.owner)),
         }
     }
 
@@ -721,6 +793,22 @@ impl<O, T: ?Sized> OwningRefMut<O, T> {
     /// Discards the reference and retrieves the owner.
     pub fn into_inner(self) -> O {
         self.owner
+    }
+}
+
+/// An opaque data structure that cannot be accessed.  Needed to ensure safety
+/// in `OwningRefMut` when reference-counting types are used.
+pub struct Opaque<T>(T);
+
+impl<T> From<T> for Opaque<T> {
+    fn from(t: T) -> Self {
+        Opaque(t)
+    }
+}
+
+impl<T> Debug for Opaque<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("Opaque")
     }
 }
 
@@ -1114,6 +1202,11 @@ pub type VecRefMut<T, U = T> = OwningRefMut<Vec<T>, U>;
 /// Typedef of a mutable owning reference that uses a `String` as the owner.
 pub type StringRefMut = OwningRefMut<String, str>;
 
+/// Typedef of a mutable owning reference that uses a `Rc` as the owner.
+pub type RcRefMut<T, U = T> = OwningRefMut<Rc<Opaque<T>>, U>;
+/// Typedef of a mutable owning reference that uses a `Arc` as the owner.
+pub type ArcRefMut<T, U = T> = OwningRefMut<Arc<Opaque<T>>, U>;
+
 /// Typedef of a mutable owning reference that uses a `RefMut` as the owner.
 pub type RefMutRefMut<'a, T, U = T> = OwningRefMut<RefMut<'a, T>, U>;
 /// Typedef of a mutable owning reference that uses a `MutexGuard` as the owner.
@@ -1149,6 +1242,10 @@ pub type ErasedArcRef<U> = OwningRef<Arc<Erased>, U>;
 
 /// Typedef of a mutable owning reference that uses an erased `Box` as the owner.
 pub type ErasedBoxRefMut<U> = OwningRefMut<Box<Erased>, U>;
+/// Typedef of a mutable owning reference that uses an erased `Rc` as the owner.
+pub type ErasedRcRefMut<U> = OwningRefMut<Rc<Erased>, U>;
+/// Typedef of a mutable owning reference that uses an erased `Arc` as the owner.
+pub type ErasedArcRefMut<U> = OwningRefMut<Arc<Erased>, U>;
 
 #[cfg(test)]
 mod tests {
